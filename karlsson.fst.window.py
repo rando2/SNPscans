@@ -2,7 +2,8 @@ import csv
 import numpy as np
 
 window=200000
-design="indiv"
+design="pooled"
+min_alleles =10 #40 for deep, 10 for wild
 
 header = ""
 ind={"Tame":[],"Aggr":[]}
@@ -29,15 +30,14 @@ def calc_metrics(Ns,Ds, eFST):
     #eFST indicates empirical FSTs (the ones directly calculated by N/D at each site), whereas tFST is the theoretical Fst, smoothed over all sites
     num_points = float(len(Ns))
     if num_points == 0:
-        print "error: no points in vectors"
-        print lastscaff, w
         return 0,0
-    N = np.array(Ns)
-    D = np.array(Ds)
-    tFST = np.sum(N) / np.sum(D) #based on Karlsson et al., Nature Genetics 2007
-    meanFST= np.mean(eFST)
-    s2FST = (1/num_points)*np.sum((eFST-meanFST)**2) #based on Oleksyk et al., 2008 PLoSOne
-    return round(tFST,5), round(s2FST,5)
+    else:
+        N = np.array(Ns)
+        D = np.array(Ds)
+        tFST = np.sum(N) / np.sum(D) #based on Karlsson et al., Nature Genetics 2007
+        meanFST= np.mean(eFST)
+        s2FST = (1/num_points)*np.sum((eFST-meanFST)**2) #based on Oleksyk et al., 2008 PLoSOne
+        return round(tFST,5), round(s2FST,5)
 
 def reset_running(): #use to set a clean slate of N and D
     return [], [], []
@@ -47,28 +47,35 @@ def parse_geno(geno, tot, design="indiv"):
     #tot = dictionary in format [0,0] representing alleles a1 and a2
     #design = whether it should parse GT calls or DP (for deep vs shallow/pooled design)
     #assumes biallelic & GATK format (/ sep GT and , sep DP)
-    if design== "indiv":
-        #if geno == "0/0":
-        #    tot[0] += 2
-        #elif geno == "0/1":
-        #    tot[0] +=1
-        #    tot[1] +=1
-        #elif geno == "1/1":
-        #    tot[1] +=2
-        
-        geno=geno.split('/')
-        for i in geno:
-            tot[int(i)] +=1 #add the number of alleles
-    elif design == "pooled":
-        geno = geno.split(',')
-        for i in [0,1]:
-            tot[i] += int(geno[i]) #add the number of reads
-    else:
-        print "design of study not specified correctly"
-        exit(1)
+    if '.' not in geno:
+        if design== "indiv":
+            #if geno == "0/0":
+            #    tot[0] += 2
+            #elif geno == "0/1":
+            #    tot[0] +=1
+            #    tot[1] +=1
+            #elif geno == "1/1":
+            #    tot[1] +=2
+            geno=geno.split('/')
+            for i in geno:
+                tot[int(i)] +=1 #add the number of alleles
+        elif design == "pooled":
+                geno = geno.split(',')
+                for i in [0,1]:
+                    tot[i] += int(geno[i]) #add the number of reads
+        else:
+            print "design of study not specified correctly"
+            exit(1)
     return tot
 
-with open("/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf",'rb') as vcffile, open("./karlsonfst.quantfilt.window.tsv","wb") as outfile:
+if design == "indiv":
+    infile="/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf"
+    outfile="./karlsonfst.quantfilt.window.tsv"
+if design == "pooled":
+    infile="/home/rando2/wild/2018/vv2align/vcf/wild.vv22.quantfilt.sort.recode.vcf"
+    outfile="/home/rando2/wild/2018/vv2align/fst/karlsonfst.quantfilt.window.ta.tsv"
+
+with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
     vcf = csv.reader(vcffile, delimiter='\t')
     writerbot = csv.writer(outfile, delimiter='\t')
     for line in vcf:
@@ -77,8 +84,11 @@ with open("/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf",'rb') as vcffile,
         if header == "":
             header = line #['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT',...
             for i in range(9,len(header)):
-                pop=header[i].split('_')[1]
-                if pop != "F1":
+                if '_' in header[i]: #idiosyncratic features of the "sample" names in my dataset
+                    pop=header[i].split('_')[1]
+                else:
+                    pop=header[i].title()
+                if pop in ind.keys():
                     ind[pop].append(i)
             writerbot.writerow(["CHROM","STARTPOS","ENDPOS","NUMSNP","KARLSSON_FST","FST_VAR"])
         else:
@@ -87,8 +97,9 @@ with open("/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf",'rb') as vcffile,
             if len(line[4].split(',')) > 1: #if it's not biallelic, this formula doesn't work
                 continue 
             if scaff != lastscaff:
+                print scaff
                 if lastscaff != "":
-                    if w[0] + window < scafflen[scaff]: #this shouldn't really happen, but just in case
+                    if w[0] + window < scafflen[scaff] or w[0] == 0: #first case shouldn't happen, second may affect short scaffolds
                         FST, s2FST = calc_metrics(N1, D1, FST1)
                         writerbot.writerow([lastscaff,w[0],w[0]+window, len(N1),FST, s2FST])
                     FST, s2FST = calc_metrics(N2, D2, FST2)
@@ -100,7 +111,7 @@ with open("/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf",'rb') as vcffile,
                 N2, D2, FST2 = reset_running()
                 #continue
 
-            if pos > w[0] + window: #if the position is outside the window and there is a next window
+            if pos > w[0] + window: #if the position is outside the window
                 FST, s2FST = calc_metrics(N1, D1, FST1) #calculate the metrics
                 writerbot.writerow([scaff,w[0],w[0]+window, len(N1),FST, s2FST]) #record them
                 w[0] += window #increment onto next window
@@ -114,10 +125,16 @@ with open("/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf",'rb') as vcffile,
             pq={"Tame":[0.0,0.0], "Aggr":[0.0,0.0]} #p,q
             for pop in ["Tame", "Aggr"]: #tabulate the alleles for each of them
                 for i in ind[pop]: #the values in the dict are NOT the names, they are the indices in the header 
-                    geno = line[i].split(':')[0]
-                    pq[pop]=parse_geno(geno, pq[pop], "indiv")
+                    gen_dict = dict(zip(line[8].split(':'),line[i].split(':')))
+                    if design == "indiv":
+                        geno = gen_dict['GT'] 
+                    else:
+                        geno = gen_dict['AD']
+                    pq[pop]=parse_geno(geno, pq[pop], design)
+            #print line
+            #print pq
 
-            if sum(pq["Tame"]) < 40 or sum(pq["Aggr"]) < 40: #if fewer than 20 animals genotyped per pop, skip
+            if sum(pq["Tame"]) < min_alleles or sum(pq["Aggr"]) < min_alleles: #if fewer than 20 animals genotyped per pop, skip
                 continue
             n1=sum(pq["Tame"]) #n is total number of alleles
             n2=sum(pq["Aggr"]) #n is total number of alleles
@@ -147,12 +164,15 @@ with open("/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf",'rb') as vcffile,
                 D1.append(D)
                 FST1.append(FST)
             else:
-                print "hopefully", pos, "is near the end of",scaff, "at", scafflen[scaff]
+                print pos, "doesn't fit in w0", w[0], "on", scaff, "which is this long:", scafflen[scaff]
             if pos >= w[1] & pos < w[1] + window:
                 N2.append(N)
                 D2.append(D)
                 FST2.append(FST)
             else:
-                print "problem with windows", pos, scaff
+                print pos, "doesn't fit in w1", w[1], "on", scaff, "which is this long:", scafflen[scaff]
+    if w[0] + window < scafflen[scaff] or w[0] == 0:
+        FST, s2FST = calc_metrics(N1, D1, FST1)
+        writerbot.writerow([lastscaff,w[0],w[0]+window, len(N1),FST, s2FST])
     FST, s2FST = calc_metrics(N2, D2, FST2)
     writerbot.writerow([lastscaff,w[1],w[1]+window, len(N2),FST, s2FST])
