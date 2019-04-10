@@ -1,12 +1,15 @@
 import csv
 import numpy as np
 
+#Change these for different analyses
 window=200000
 design="pooled"
 min_alleles =10 #40 for deep, 10 for wild
+populations= ["wild","farm"]
 
+#Set up global variables
 header = ""
-ind={"Tame":[],"Aggr":[]}
+ind=dict(zip(populations,[[] for x in populations]))
 lastscaff=""
 w=[]
 N1=[]
@@ -49,13 +52,6 @@ def parse_geno(geno, tot, design="indiv"):
     #assumes biallelic & GATK format (/ sep GT and , sep DP)
     if '.' not in geno:
         if design== "indiv":
-            #if geno == "0/0":
-            #    tot[0] += 2
-            #elif geno == "0/1":
-            #    tot[0] +=1
-            #    tot[1] +=1
-            #elif geno == "1/1":
-            #    tot[1] +=2
             geno=geno.split('/')
             for i in geno:
                 tot[int(i)] +=1 #add the number of alleles
@@ -73,7 +69,8 @@ if design == "indiv":
     outfile="./karlsonfst.quantfilt.window.tsv"
 if design == "pooled":
     infile="/home/rando2/wild/2018/vv2align/vcf/wild.vv22.quantfilt.sort.recode.vcf"
-    outfile="/home/rando2/wild/2018/vv2align/fst/karlsonfst.quantfilt.window.ta.tsv"
+    outfile="/home/rando2/wild/2018/vv2align/fst/karlsonfst.quantfilt.window." + populations[0][0] + populations[1][0] + ".tsv"
+    print outfile
 
 with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
     vcf = csv.reader(vcffile, delimiter='\t')
@@ -84,12 +81,16 @@ with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
         if header == "":
             header = line #['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT',...
             for i in range(9,len(header)):
-                if '_' in header[i]: #idiosyncratic features of the "sample" names in my dataset
+                if '_' in header[i]: #idiosyncratic features of the "sample" names in my dataset- this is for the deep data
                     pop=header[i].split('_')[1]
-                else:
+                else: #the sample names aren't capitalized in the wild ata
                     pop=header[i].title()
-                if pop in ind.keys():
+                if pop in populations:
                     ind[pop].append(i)
+                elif pop in ["Tame","Aggr","Conv"] and "farm" in populations:
+                    ind["farm"].append(i)
+                elif pop in ["Maryland","Newf"] and "wild" in populations:
+                    ind["wild"].append(i)
             writerbot.writerow(["CHROM","STARTPOS","ENDPOS","NUMSNP","KARLSSON_FST","FST_VAR"])
         else:
             scaff = line[0]
@@ -122,34 +123,34 @@ with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
                 w[1] += window
                 N2, D2,FST2 = reset_running()
 
-            pq={"Tame":[0.0,0.0], "Aggr":[0.0,0.0]} #p,q
-            for pop in ["Tame", "Aggr"]: #tabulate the alleles for each of them
-                for i in ind[pop]: #the values in the dict are NOT the names, they are the indices in the header 
+            pq=dict(zip(populations,[[0.0,0.0] for x in populations])) #p,q
+            for p in populations: #tabulate the alleles for each of them
+                for i in ind[p]: #the values in the dict are NOT the names, they are the indices in the header 
                     gen_dict = dict(zip(line[8].split(':'),line[i].split(':')))
                     if design == "indiv":
                         geno = gen_dict['GT'] 
                     else:
                         geno = gen_dict['AD']
-                    pq[pop]=parse_geno(geno, pq[pop], design)
+                    pq[p]=parse_geno(geno, pq[p], design)
             #print line
             #print pq
 
-            if sum(pq["Tame"]) < min_alleles or sum(pq["Aggr"]) < min_alleles: #if fewer than 20 animals genotyped per pop, skip
+            if sum(pq[populations[0]]) < min_alleles or sum(pq[populations[1]]) < min_alleles: #if fewer than 20 animals genotyped per pop, skip
                 continue
-            n1=sum(pq["Tame"]) #n is total number of alleles
-            n2=sum(pq["Aggr"]) #n is total number of alleles
+            n1=sum(pq[populations[0]]) #n is total number of alleles
+            n2=sum(pq[populations[1]]) #n is total number of alleles
 
-            p1 = pq["Tame"][0]/n1
-            p2 = pq["Aggr"][0]/n2
-            q1= pq["Tame"][1]/n1
-            q2= pq["Aggr"][1]/n2
+            p1 = pq[populations[0]][0]/n1
+            p2 = pq[populations[1]][0]/n2
+            q1= pq[populations[0]][1]/n1
+            q2= pq[populations[1]][1]/n2
             
             #This formula is definitely not correct (assumes = sample sizes), but it's the one Jen told me to use to match her analysis
             #N = float(p1*(q2 - q1) + p2*(q1 - q2))
             #D = float(p1*q2+ q1*p2)
 
-            h1= (pq["Tame"][0]*pq["Tame"][1]) / (n1*(n1-1))
-            h2= (pq["Aggr"][0]*pq["Aggr"][1]) / (n2*(n2-1))
+            h1= (pq[populations[0]][0]*pq[populations[0]][1]) / (n1*(n1-1))
+            h2= (pq[populations[1]][0]*pq[populations[1]][1]) / (n2*(n2-1))
 
             N=(p1 - p2)**2 - h1/n1- h2/n2
             D= N + h1 + h2
