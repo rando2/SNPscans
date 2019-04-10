@@ -1,6 +1,10 @@
 import csv
 import numpy as np
 
+
+"""This is just an implementation of the Karlsson et al. (2007) formula for FST that I'm playing with, alongside the Oleksyk et al. (2008)
+formula for variation in FST. There will almost certainly be changes made before the final version!"""
+
 window=200000
 design="indiv"
 
