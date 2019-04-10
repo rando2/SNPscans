@@ -2,14 +2,22 @@ import csv
 import numpy as np
 
 #Change these for different analyses
-window=200000
-design="pooled"
-min_alleles =10 #40 for deep, 10 for wild
-populations= ["wild","farm"]
+window=500000
+design="pooled" #"pooled"
+populations= ["tame", "aggr"] #["wild","farm"]
 
 #Set up global variables
 header = ""
+populations = [x.title() for x in populations]
 ind=dict(zip(populations,[[] for x in populations]))
+
+if design == "pooled":
+    min_alleles = 10
+elif design == "indiv":
+    min_alleles = 40
+else:
+    print "design not recognized"
+    exit(1)
 lastscaff=""
 w=[]
 N1=[]
@@ -18,6 +26,7 @@ D1=[]
 D2=[]
 FST1=[]
 FST2=[]
+total_sites = 0
 
 scafflen = {}
 with open("/home/rando2/wild/FULL_INDEX_SCAFFOLD_LENGTHS.csv",'rb') as lenfile:
@@ -30,7 +39,6 @@ with open("/home/rando2/wild/FULL_INDEX_SCAFFOLD_LENGTHS.csv",'rb') as lenfile:
             scafflen[scaff] = int(sclen)
 
 def calc_metrics(Ns,Ds, eFST):
-    #eFST indicates empirical FSTs (the ones directly calculated by N/D at each site), whereas tFST is the theoretical Fst, smoothed over all sites
     num_points = float(len(Ns))
     if num_points == 0:
         return 0,0
@@ -40,7 +48,11 @@ def calc_metrics(Ns,Ds, eFST):
         tFST = np.sum(N) / np.sum(D) #based on Karlsson et al., Nature Genetics 2007
         meanFST= np.mean(eFST)
         s2FST = (1/num_points)*np.sum((eFST-meanFST)**2) #based on Oleksyk et al., 2008 PLoSOne
-        return round(tFST,5), round(s2FST,5)
+        return round(tFST,5) , round(s2FST,5)
+
+def calc_var(FST, meanFST):
+    num_points = float(len(Ns))
+    s2FST = (1/num_points)*np.sum((FST-meanFST)**2) #based on Oleksyk et al., 2008 PLoSOne
 
 def reset_running(): #use to set a clean slate of N and D
     return [], [], []
@@ -66,10 +78,10 @@ def parse_geno(geno, tot, design="indiv"):
 
 if design == "indiv":
     infile="/home/rando2/deepTA/vcf/fox5k.quantfilt.recode.vcf"
-    outfile="./karlsonfst.quantfilt.window.tsv"
+    outfile="./karlsonfst.quantfilt.window" + str(window) + ".tsv"
 if design == "pooled":
     infile="/home/rando2/wild/2018/vv2align/vcf/wild.vv22.quantfilt.sort.recode.vcf"
-    outfile="/home/rando2/wild/2018/vv2align/fst/karlsonfst.quantfilt.window." + populations[0][0] + populations[1][0] + ".tsv"
+    outfile="/home/rando2/wild/2018/vv2align/fst/karlsonfst.quantfilt.window" + str(window) + "." + populations[0][0] + populations[1][0] + ".tsv"
     print outfile
 
 with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
@@ -87,16 +99,17 @@ with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
                     pop=header[i].title()
                 if pop in populations:
                     ind[pop].append(i)
-                elif pop in ["Tame","Aggr","Conv"] and "farm" in populations:
-                    ind["farm"].append(i)
-                elif pop in ["Maryland","Newf"] and "wild" in populations:
-                    ind["wild"].append(i)
+                elif pop in ["Tame","Aggr","Conv"] and "Farm" in populations:
+                    ind["Farm"].append(i)
+                elif pop in ["Maryland","Newf"] and "Wild" in populations:
+                    ind["Wild"].append(i)
             writerbot.writerow(["CHROM","STARTPOS","ENDPOS","NUMSNP","KARLSSON_FST","FST_VAR"])
         else:
             scaff = line[0]
             pos = int(line[1])
             if len(line[4].split(',')) > 1: #if it's not biallelic, this formula doesn't work
                 continue 
+            total_sites +=1
             if scaff != lastscaff:
                 print scaff
                 if lastscaff != "":
@@ -112,12 +125,12 @@ with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
                 N2, D2, FST2 = reset_running()
                 #continue
 
-            if pos > w[0] + window: #if the position is outside the window
+            while pos > w[0] + window: #if the position is outside the window
                 FST, s2FST = calc_metrics(N1, D1, FST1) #calculate the metrics
                 writerbot.writerow([scaff,w[0],w[0]+window, len(N1),FST, s2FST]) #record them
                 w[0] += window #increment onto next window
                 N1, D1, FST1 = reset_running()
-            if pos > w[1] + window:
+            while pos > w[1] + window:
                 FST, s2FST = calc_metrics(N2, D2, FST2)
                 writerbot.writerow([scaff,w[1],w[1]+window, len(N2),FST, s2FST])
                 w[1] += window
@@ -177,3 +190,4 @@ with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
         writerbot.writerow([lastscaff,w[0],w[0]+window, len(N1),FST, s2FST])
     FST, s2FST = calc_metrics(N2, D2, FST2)
     writerbot.writerow([lastscaff,w[1],w[1]+window, len(N2),FST, s2FST])
+    print design, populations, total_sites
