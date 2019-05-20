@@ -99,9 +99,9 @@ with open(infile,'rb') as vcffile, open(outfile,"wb") as outfile:
                     pop=header[i].title()
                 if pop in populations:
                     ind[pop].append(i)
-                elif pop in ["Tame","Aggr","Conv"] and "Farm" in populations:
+                if pop in ["Tame","Aggr","Conv"] and "Farm" in populations:
                     ind["Farm"].append(i)
-                elif pop in ["Maryland","Newf"] and "Wild" in populations:
+                if pop in ["Maryland","Newf"] and "Wild" in populations:
                     ind["Wild"].append(i)
             writerbot.writerow(["CHROM","STARTPOS","ENDPOS","NUMSNP","KARLSSON_FST","FST_VAR"])
         else:
